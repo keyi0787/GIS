@@ -85,7 +85,7 @@ spain_cities_diff2 <- Spanish_cities_join_ID%>%
 ```{r}
 library(tidyverse)
 tidy_city_diff <- spain_cities_diff2 %>%
-  dplyr::select(c(,16:27))%>%
+  dplyr::select(c(.,16:27))%>%
   st_drop_geometry(.)%>%
   as_tibble()%>%
   pivot_longer(everything(),
