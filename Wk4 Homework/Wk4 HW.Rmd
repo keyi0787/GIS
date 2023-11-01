@@ -47,11 +47,15 @@ report1 <- report %>%
   dplyr::rename(giirank_2021='gii_rank_2021') %>%
   dplyr::select(iso3, country, hdicode, region, starts_with("gii_"))
 ```
+# Here we select all the columns related with gii except the ranking, but we may only need gii_2019 and gii_2010.
+
 3. create a new column
 ```{r}
 final <- report1 %>%
   mutate(diff_2010_19 = gii_2019 - gii_2010)
 ```
+# We can use countrycode package here to mutate a new column to match country with iso2 and left join by the code.
+
 4. left_join
 ```{r}
 joined_data <- shape %>%
@@ -60,7 +64,7 @@ joined_data <- shape %>%
             final,
             by = c("country" = "country"))
 ```
-5. map
+5. map # no need to map
 ```{r}
 library(tmap)
 library(tmaptools)
