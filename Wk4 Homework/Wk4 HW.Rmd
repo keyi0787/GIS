@@ -8,36 +8,19 @@ date: "2023-10-29"
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+1.  read the data in
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
-1. read the data in
 ```{r}
 library(tidyverse)
 library(here)
 library(sf)
-report <- read_csv(here::here("Wk4 Homework", "data source", "HDR21-22_Composite_indices_complete_time_series.csv"),
+report <- read_csv(here::here("Wk4 Homework",  "HDR21-22_Composite_indices_complete_time_series.csv"),
                    na="NULL")
-shape <- st_read(here::here("Wk4 Homework", "data source", "World_Countries_Generalized", "World_Countries_Generalized.shp"))
+shape <- st_read(here::here("Wk4 Homework", "World_Countries_Generalized", "World_Countries_Generalized.shp"))
 ```
-2. filter the data in report
+
+2.  filter the data in report
+
 ```{r}
 library(dplyr)
 library(janitor)
@@ -47,16 +30,20 @@ report1 <- report %>%
   dplyr::rename(giirank_2021='gii_rank_2021') %>%
   dplyr::select(iso3, country, hdicode, region, starts_with("gii_"))
 ```
+
 # Here we select all the columns related with gii except the ranking, but we may only need gii_2019 and gii_2010.
 
-3. create a new column
+3.  create a new column
+
 ```{r}
 final <- report1 %>%
   mutate(diff_2010_19 = gii_2019 - gii_2010)
 ```
+
 # We can use countrycode package here to mutate a new column to match country with iso2 and left join by the code.
 
-4. left_join
+4.  left_join
+
 ```{r}
 joined_data <- shape %>%
   clean_names(.)%>%
@@ -64,7 +51,9 @@ joined_data <- shape %>%
             final,
             by = c("country" = "country"))
 ```
-5. map # no need to map
+
+5.  map \# no need to map
+
 ```{r}
 library(tmap)
 library(tmaptools)
@@ -73,27 +62,4 @@ tmap_mode("plot")
 qtm(joined_data, 
     fill = "diff_2010_19")
 ```
-# method 2
-> report error "java.lang.NullPointerExceptionError in osmtile(x%%nX, y, zoom, type) : could not obtain tile: 0 4 2"
-```{r}
-library(OpenStreetMap)
-library(rJava)
-gender_inequality <- joined_data %>%
-  st_bbox(.) %>%
-  tmaptools::read_osm(., type="bing", zoom=NULL)
-tmap_mode("plot")
-tm_shape(gender_inequality)+
-  tm_rgb()+
-  tm_shape(joined_data) + 
-  tm_polygons("diff_2010_19", 
-        style="jenks",
-        palette="YlOrBr",
-        midpoint=NA,
-        title="Global Gender Inequality",
-        alpha = 0.5) + 
-  tm_compass(position = c("left", "bottom"),type = "arrow") + 
-  tm_scale_bar(position = c("left", "bottom")) +
-  tm_layout(title = "Job seekers' Allowance Claimants", legend.position = c("right", "bottom"))
-```
-not working yet (10/29)
 
