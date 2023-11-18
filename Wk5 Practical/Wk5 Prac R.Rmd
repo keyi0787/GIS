@@ -297,7 +297,7 @@ map<- leaflet(Joined) %>%
               dashArray = "3",
               popup = popupairbnb,
               fillOpacity = 0.7,
-              fillColor = ~pal2(`Airbnb count`),
+              fillColor = ~pal1(`Airbnb count`),
               group = "Airbnb")%>%
   
   addPolygons(fillColor = ~pal2(`Hotel count`), 

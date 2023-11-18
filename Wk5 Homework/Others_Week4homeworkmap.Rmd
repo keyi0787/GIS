@@ -1,0 +1,192 @@
+Homework-Difference in Inequality between 2010 and 2019
+```{r}
+library(sf)
+library(RSQLite)
+library(tidyverse)
+library(dplyr)
+library(tmap)
+library(tmaptools)
+```
+read in the shapefile
+```{r}
+shape <- st_read(here::here("Wk4 Homework", "data source", "World_Countries_Generalized", "World_Countries_Generalized.shp"))
+```
+read in the csv
+```{r}
+mycsv <- read_csv(here::here("Wk4 Homework", "data source", "HDR21-22_Composite_indices_complete_time_series.csv"),
+                   na="NULL")
+```
+select gii 2010-2019
+```{r}
+gii2010to2019 <- mycsv %>%
+  dplyr::select(contains("country"),contains("gii_2010"),contains("gii_2011"),
+                contains("gii_2012"),contains("gii_2013"),contains("gii_2014"),
+                contains("gii_2015"),contains("gii_2016"),contains("gii_2017"),
+                contains("gii_2018"),contains("gii_2019"))
+```
+write in world map
+```{r}
+WorldMapgii <- shape %>% 
+  left_join(., 
+            gii2010to2019,
+            by = c("COUNTRY" = "country"))
+frames <- list()
+```
+create difference map
+```{r}
+Dif2010to2019 <- WorldMapgii%>%
+  mutate(dif=gii_2019-gii_2010)%>%
+  mutate(difcompare=case_when(dif >= 0 ~ "increase", TRUE ~ "decrease"))
+Difmap <- tm_shape(Dif2010to2019) + 
+  tm_borders() + 
+  tm_fill("dif",title = "Difference in Inequality between 2010 and 2019") +
+  tm_layout(legend.position = c("left","bottom"), legend.text.size = 0.6)
+Difmap
+```
+create changing maps
+```{r}
+tmap_mode("plot")
+breaks <- c(0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9)
+for (year in 2010:2019) {
+  giimap <- tm_shape(WorldMapgii) + 
+    tm_borders() + 
+    tm_fill(paste("gii_", year, sep = ""), breaks = breaks, palette = "Reds") +
+    tm_layout(legend.position = c("left", "center"), legend.text.size = 0.6)
+  frames[[year - 2009]] <- giimap
+}
+giimap
+```
+create gif
+```{r}
+library(gifski)
+giimaps <- tmap_animation(
+  frames,
+  filename = "giimap2010to2019.gif",
+  width = 800,
+  height = 600,
+  delay = 100
+)
+```
+###Slight try on interactive map
+1. Basic
+```{r}
+breaks1 = c(-0.4, -0.3, -0.2, -0.1, 0, 0.1)
+tmap_mode("view")
+
+tm_shape(Dif2010to2019) + 
+  tm_polygons("dif", breaks=breaks1)
+```
+2. Advanced_Multiple basemap
+```{r}
+# library for pop up boxes
+library(leafpop)
+library(leaflet)
+
+#remove the geometry for our pop up boxes to avoid
+popup <- Dif2010to2019 %>%
+  st_drop_geometry()%>%
+  dplyr::select(`dif`, COUNTRY)%>%
+  popupTable()
+
+tmap_mode("view")
+
+# set the colour palettes using our previously defined breaks
+pal <- Dif2010to2019 %>%
+  colorBin(palette = "YlOrRd", domain=.$`dif`, bins=breaks1)
+#pal1 <-colorBin(palette = "YlOrRd", domain=Joined$`Airbnb count`, bins=breaks)
+
+map<- leaflet(Dif2010to2019) %>%
+  # add basemap options
+  addTiles(group = "OSM (default)") %>%
+  addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "CartoDB")%>%
+  
+  #add our polygons, linking to the tables we just made
+  addPolygons(color="white", 
+              weight = 2,
+              opacity = 1,
+              dashArray = "3",
+              popup = popup,
+              fillOpacity = 0.7,
+              fillColor = ~pal(`dif`),
+              group = "dif")%>%
+ 
+  # add a legend
+  addLegend(pal = pal, values = ~`dif`, position ="bottomleft", title = "Dif2010to2019") %>%
+  # specify layers control
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Toner", "Toner Lite", "CartoDB"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+# plot the map
+map
+```
+3. Multiple groups
+```{r}
+breaks2 = c(-0.1, -0.08, -0.06, -0.04, -0.02, 0, 0.02, 0.04, 0.06, 0.08, 0.1)
+#create diff data
+Diff <- WorldMapgii %>%
+  mutate(diffin2019=gii_2019-gii_2015)%>%
+  mutate(diffin2015=gii_2015-gii_2010)
+
+#remove the geometry for our pop up boxes to avoid
+popup2019 <- Diff %>%
+  st_drop_geometry()%>%
+  dplyr::select(`diffin2019`, COUNTRY)%>%
+  popupTable()
+
+popup2015 <- Diff %>%
+  st_drop_geometry()%>%
+  dplyr::select(`diffin2015`, COUNTRY)%>%
+  popupTable()
+
+tmap_mode("view")
+
+# set the colour palettes using our previously defined breaks
+pal1 <- Diff %>%
+  colorBin(palette = "YlOrRd", domain=.$`diffin2019`, bins=breaks2)
+#pal1 <-colorBin(palette = "YlOrRd", domain=Joined$`Airbnb count`, bins=breaks)
+
+pal2 <- Diff %>%
+  colorBin(palette = "YlOrRd", domain=.$`diffin2015`, bins=breaks2)
+
+map<- leaflet(Diff) %>%
+  # add basemap options
+  addTiles(group = "OSM (default)") %>%
+  addProviderTiles(providers$Stamen.Toner, group = "Toner") %>%
+  addProviderTiles(providers$Stamen.TonerLite, group = "Toner Lite") %>%
+  addProviderTiles(providers$CartoDB.Positron, group = "CartoDB")%>%
+  
+  #add our polygons, linking to the tables we just made
+  addPolygons(color="white", 
+              weight = 2,
+              opacity = 1,
+              dashArray = "3",
+              popup = popup2019,
+              fillOpacity = 0.7,
+              fillColor = ~pal1(`diffin2019`),
+              group = "2019-15")%>%
+  
+  addPolygons(fillColor = ~pal2(`diffin2015`), 
+              weight = 2,
+              opacity = 1,
+              color = "white",
+              dashArray = "3",
+              popup = popup2015,
+              fillOpacity = 0.7,group = "2015-10")%>%
+  # add a legend
+  addLegend(pal = pal2, values = ~`diffin2015`, group = c("2019-15","2015-10"), 
+            position ="bottomleft", title = "Annual Difference") %>%
+  # specify layers control
+  addLayersControl(
+    baseGroups = c("OSM (default)", "Toner", "Toner Lite", "CartoDB"),
+    overlayGroups = c("2019-15","2015-10"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+# plot the map
+map
+```
+
