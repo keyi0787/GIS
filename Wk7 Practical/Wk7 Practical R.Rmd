@@ -1,0 +1,351 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-11-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# Read the data in
+```{r}
+# Packages
+library(here)
+library(janitor)
+library(sf)
+library(tidyverse)
+#read the ward data in
+LondonWards <- st_read(here::here("Wk7 Practical", "data", "statistical-gis-boundaries-london", "ESRI", "London_Ward.shp"))
+
+LondonWardsMerged <- st_read(here::here("Wk7 Practical", "data", "statistical-gis-boundaries-london", "ESRI", "London_Ward_CityMerged.shp"))%>%
+st_transform(.,27700)
+
+WardData <- read_csv("https://data.london.gov.uk/download/ward-profiles-and-atlas/772d2d64-e8c6-46cb-86f9-e52b4c7851bc/ward-profiles-excel-version.csv",
+                    locale = locale(encoding = "latin1"),
+                     na = c("NA", "n/a")) %>% 
+  clean_names()
+
+LondonWardsMerged <- LondonWardsMerged %>% 
+  left_join(WardData, 
+            by = c("GSS_CODE" = "new_code"))%>%
+  dplyr::distinct(GSS_CODE, .keep_all = T)%>%
+  dplyr::select(GSS_CODE, ward_name, average_gcse_capped_point_scores_2014)
+```
+# Check the crs
+```{r}
+#have a look to check that it's 
+#in the right projection
+st_crs(LondonWardsMerged)
+```
+# Plot to check whether it looks reasonable
+```{r}
+library(tmap)
+
+BluePlaques <- st_read(here::here("Wk6 Practical", "data source", "open-plaques-london-2018-04-08.geojson")) %>%
+    st_transform(.,27700)
+```
+```{r}
+tmap_mode("plot")
+tm_shape(LondonWardsMerged) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(BluePlaques) +
+  tm_dots(col = "blue")
+```
+# Data cleaning
+## Exclude the blue plaques fallen out of london
+```{r}
+summary(BluePlaques)
+# crop the Blueplaques within london
+BluePlaquesSub <- BluePlaques[LondonWardsMerged,]
+# Plot
+tm_shape(LondonWardsMerged) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(BluePlaquesSub) +
+  tm_dots(col = "blue")
+```
+# Data manipulation
+## Count the blue plaques
+```{r}
+example<-st_intersects(LondonWardsMerged, BluePlaquesSub)
+example
+```
+## Check the example
+```{r}
+check_example <- LondonWardsMerged%>%
+  st_join(BluePlaquesSub)%>%
+  filter(ward_name=="Kingston upon Thames - Coombe Hill")
+```
+## Take the length of each list in example to be the number of data points in each ward
+```{r}
+library(sf)
+points_sf_joined <- LondonWardsMerged%>%
+  mutate(n = lengths(st_intersects(., BluePlaquesSub)))%>%
+  janitor::clean_names()%>%
+  #calculate area
+  mutate(area=st_area(.))%>%
+  #then density of the points per ward
+  mutate(density=n/area)%>%
+  #select density and some other variables 
+  dplyr::select(density, ward_name, gss_code, n, average_gcse_capped_point_scores_2014)
+```
+## Choropleth map
+```{r}
+points_sf_joined<- points_sf_joined %>%                 group_by(gss_code) %>%         
+  summarise(density = first(density),
+          wardname= first(ward_name),
+          plaquecount= first(n))
+
+tm_shape(points_sf_joined) +
+    tm_polygons("density",
+        style="jenks",
+        palette="PuOr",
+        midpoint=NA,
+        popup.vars=c("wardname", "density"),
+        title="Blue Plaque Density")
+```
+### From the map, we may have some clustering, so check with Moran's I
+## However, weight matrix needed first
+# weight matrix
+```{r}
+library(spdep)
+## centroids of all wards
+#First calculate the centroids of all Wards in London
+
+coordsW <- points_sf_joined%>%
+  st_centroid()%>%
+  st_geometry()
+  
+plot(coordsW,axes=TRUE)
+```
+## create a neighbours list
+```{r}
+#create a neighbours list
+LWard_nb <- points_sf_joined %>%
+  poly2nb(., queen=T)
+summary(LWard_nb)
+```
+## Plot the neighbours
+```{r}
+#plot them
+plot(LWard_nb, st_geometry(coordsW), col="red")
+#add a map underneath
+plot(points_sf_joined$geometry, add=T)
+```
+## Matrix style
+### start with binary
+```{r}
+#create a spatial weights matrix from these weights
+Lward.lw <- LWard_nb %>%
+  nb2mat(., style="B")
+
+sum(Lward.lw)
+```
+### C means divide our 625 wards by 3680; R means 1 is divided by the sum of the number of neighbours in each row
+```{r}
+sum(Lward.lw[1,])
+```
+# Autocorrelation
+## a spatial weight list
+```{r}
+Lward.lw <- LWard_nb %>%
+  nb2listw(., style="C")
+```
+## Moran's I
+```{r}
+I_LWard_Global_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  moran.test(., Lward.lw)
+
+I_LWard_Global_Density
+```
+## Geary's C
+```{r}
+C_LWard_Global_Density <- 
+  points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  geary.test(., Lward.lw)
+
+C_LWard_Global_Density
+```
+## Getis Ord
+```{r}
+G_LWard_Global_Density <- 
+  points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  globalG.test(., Lward.lw)
+
+G_LWard_Global_Density
+```
+## Summary
+For Moran's I:
+(1 = clustered, 0 = no pattern, -1 = dispersed), here is 0.67 -> some distinctive clustering
+
+For Geary's C:
+(1 means no spatial autocorrelation, <1 - positive spatial autocorrelation or similar values clustering, >1 - negative spatial autocorreation or dissimilar values clustering)
+
+For General G:
+If G > Expected = High values clustering; if G < expected = low values clustering
+
+## Local Moran's I (for each ward)
+### The null hypothesis is "there is complete spatial randomness"
+```{r}
+#use the localmoran function to generate I for each ward in the city
+
+I_LWard_Local_count <- points_sf_joined %>%
+  pull(plaquecount) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+I_LWard_Local_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+#what does the output (the localMoran object) look like?
+slice_head(I_LWard_Local_Density, n=5)
+```
+### Copy column 1&4 back into the LondonWards
+```{r}
+points_sf_joined <- points_sf_joined %>%
+  mutate(plaque_count_I = as.numeric(I_LWard_Local_count$Ii))%>%
+  mutate(plaque_count_Iz =as.numeric(I_LWard_Local_count$Z.Ii))%>%
+  mutate(density_I =as.numeric(I_LWard_Local_Density$Ii))%>%
+  mutate(density_Iz =as.numeric(I_LWard_Local_Density$Z.Ii))
+```
+### Plot the outputs
+```{r}
+# Represent the different significant levels
+breaks1<-c(-1000,-2.58,-1.96,-1.65,1.65,1.96,2.58,1000)
+
+# Create a new colour brewer
+library(RColorBrewer)
+MoranColours<- rev(brewer.pal(8, "RdGy"))
+
+# Plot an interactive map
+tm_shape(points_sf_joined) +
+    tm_polygons("plaque_count_Iz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, Blue Plaques in London")
+```
+## Local Getis Ord
+is the local sum (of the neighbourhood) compared to the sum of all features
+```{r}
+Gi_LWard_Local_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  localG(., Lward.lw)
+
+head(Gi_LWard_Local_Density)
+```
+### ADD Getis Ord data to the sf
+```{r}
+points_sf_joined <- points_sf_joined %>%
+  mutate(density_G = as.numeric(Gi_LWard_Local_Density))
+```
+### Map the outputs
+```{r}
+library(RColorBrewer)
+
+GIColours<- rev(brewer.pal(8, "RdBu"))
+
+#now plot on an interactive map
+tm_shape(points_sf_joined) +
+    tm_polygons("density_G",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, Blue Plaques in London")
+```
+The differences bt Local Moran's I & Local Getis Ord: 
+G∗ provides insights into the nature of local clusters (hotspots or coldspots).
+Moran's I provides insights into the overall pattern of spatial autocorrelation.
+
+# Other variables
+```{r}
+#use head to see what other variables are in the data file
+
+slice_head(points_sf_joined, n=2)
+```
+## Print out the class of each column
+```{r}
+Datatypelist <- LondonWardsMerged %>% 
+  st_drop_geometry()%>%
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+```{r}
+I_LWard_Local_GCSE <- LondonWardsMerged %>%
+  arrange(GSS_CODE)%>%
+  pull(average_gcse_capped_point_scores_2014) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+points_sf_joined <- points_sf_joined %>%
+  arrange(gss_code)%>%
+  mutate(GCSE_LocIz = as.numeric(I_LWard_Local_GCSE$Z.Ii))
+
+
+tm_shape(points_sf_joined) +
+    tm_polygons("GCSE_LocIz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, GCSE Scores")
+```
+```{r}
+G_LWard_Local_GCSE <- LondonWardsMerged %>%
+  dplyr::arrange(GSS_CODE)%>%
+  dplyr::pull(average_gcse_capped_point_scores_2014) %>%
+  as.vector()%>%
+  localG(., Lward.lw)
+
+points_sf_joined <- points_sf_joined %>%
+  dplyr::arrange(gss_code)%>%
+  dplyr::mutate(GCSE_LocGiz = as.numeric(G_LWard_Local_GCSE))
+
+tm_shape(points_sf_joined) +
+    tm_polygons("GCSE_LocGiz",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, GCSE Scores")
+```
+
